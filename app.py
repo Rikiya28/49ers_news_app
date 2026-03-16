@@ -111,40 +111,72 @@ st.markdown("<p style='text-align: center; color: #666;'>Latest updates on the 4
 # Appending a thin visual divider below title
 st.write("")
 
-# Dummy Data representing the fetched and translated news
-news_data = [
-    {
-        "eng_title": "49ers Secure Crucial Victory in Overtime Thriller",
-        "eng_body": "The San Francisco 49ers pulled off a stunning overtime win on Sunday, showcasing their resilient defense and explosive offense to keep their playoff hopes alive.",
-        "jp_title": "49ers、延長戦の激闘を制し重要な勝利を収める",
-        "jp_body": "サンフランシスコ・49ersは日曜日の試合で驚異的な延長戦での勝利を収め、粘り強いディフェンスと爆発力のあるオフェンスを見せつけ、プレーオフ進出への希望を繋ぎました。"
-    },
-    {
-        "eng_title": "Star Quarterback Returns to Practice After Injury",
-        "eng_body": "In a major boost for the team, the 49ers' starting quarterback was seen practicing with the first team today, raising hopes for his return next week.",
-        "jp_title": "スターQB、ケガから復帰し練習に参加",
-        "jp_body": "チームにとって大きな追い風となるニュースです。49ersの先発クォーターバックが今日、主力チームとの練習に参加しているのが目撃され、来週の復帰への期待が高まっています。"
-    },
-    {
-        "eng_title": "Defense Dominates: 5 Sacks and 3 Interceptions",
-        "eng_body": "The 49ers defense delivered a masterclass performance, recording five sacks and forcing three crucial interceptions to shut down the opposing offense.",
-        "jp_title": "ディフェンスが圧倒：5サックと3インターセプトを記録",
-        "jp_body": "49ersのディフェンス陣は、5つのサックを記録し、3つの決定的なインターセプトを奪うという完璧なパフォーマンスを見せ、相手オフェンスを完全に封じ込めました。"
-    }
-]
+# Function to fetch and translate news
+@st.cache_data(ttl=1800) # Cache for 30 minutes to avoid hitting API/RSS limits
+def fetch_49ers_news():
+    import feedparser
+    try:
+        from googletrans import Translator
+        translator = Translator()
+        has_translator = True
+    except ImportError:
+        has_translator = False
 
-# Displaying each news item
-for news in news_data:
-    # Do not indent the HTML string inside st.markdown, 
-    # as Streamlit's markdown parser will treat 4-space indentations as code blocks.
-    html_content = f"""<div class="news-container">
-<div class="eng-title"><span class="lang-badge badge-en">EN</span> {news['eng_title']}</div>
-<div class="eng-body">{news['eng_body']}</div>
-<div class="divider"></div>
-<div class="jp-title"><span class="lang-badge badge-jp">JP</span> {news['jp_title']}</div>
-<div class="jp-body">{news['jp_body']}</div>
-</div>"""
-    st.markdown(html_content, unsafe_allow_html=True)
+    # Using Google News RSS for 49ers
+    rss_url = "https://news.google.com/rss/search?q=San+Francisco+49ers&hl=en-US&gl=US&ceid=US:en"
+    feed = feedparser.parse(rss_url)
+    
+    news_items = []
+    
+    # Get top 5 news items
+    for entry in feed.entries[:5]:
+        eng_title = entry.title
+        
+        # Google News summary is often messy HTML, so we use source, date, and link as the "summary/link"
+        source = getattr(entry, 'source', {}).get('title', 'Google News')
+        published = getattr(entry, 'published', '')
+        link = getattr(entry, 'link', '')
+        eng_body = f"Source: {source} <br/> Published: {published} <br/> <a href='{link}' target='_blank'>Read Full Article</a>"
+        
+        # Default placeholder for translation
+        jp_title = "翻訳結果：考え中..."
+        jp_body = f"配信元: {source} <br/> 日時: {published} <br/> <a href='{link}' target='_blank'>記事を読む (英語)</a>"
+        
+        if has_translator:
+            try:
+                # Attempt to translate the title
+                translated = translator.translate(eng_title, dest='ja')
+                if translated and translated.text:
+                    jp_title = translated.text
+            except Exception as e:
+                # Fallback to placeholder if translation API fails
+                pass
+                
+        news_items.append({
+            "eng_title": eng_title,
+            "eng_body": eng_body,
+            "jp_title": jp_title,
+            "jp_body": jp_body
+        })
+        
+    return news_items
+
+with st.spinner('Fetching latest 49ers news...'):
+    news_data = fetch_49ers_news()
+
+if not news_data:
+    st.warning("ニュースの取得に失敗しました。後でもう一度お試しください。")
+else:
+    # Displaying each news item
+    for news in news_data:
+        html_content = f"""<div class="news-container">
+    <div class="eng-title"><span class="lang-badge badge-en">EN</span> {news['eng_title']}</div>
+    <div class="eng-body">{news['eng_body']}</div>
+    <div class="divider"></div>
+    <div class="jp-title"><span class="lang-badge badge-jp">JP</span> {news['jp_title']}</div>
+    <div class="jp-body">{news['jp_body']}</div>
+    </div>"""
+        st.markdown(html_content, unsafe_allow_html=True)
 
 # Sidebar information
 with st.sidebar:
