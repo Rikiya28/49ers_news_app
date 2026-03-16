@@ -1,4 +1,14 @@
 import streamlit as st
+import feedparser
+import re
+import html
+
+try:
+    from deep_translator import GoogleTranslator
+    translator_instance = GoogleTranslator(source='auto', target='ja')
+except ImportError as e:
+    print("ImportError of deep_translator:", e)
+    translator_instance = None
 
 # Page configuration
 st.set_page_config(
@@ -111,17 +121,12 @@ st.markdown("<p style='text-align: center; color: #666;'>Latest updates on the 4
 # Appending a thin visual divider below title
 st.write("")
 
+if not translator_instance:
+    st.warning("⚠️ **翻訳機能が無効化されています** (`deep-translator` が見つかりません)。\n\nVS Codeで「推奨(Recommended)」のPython環境を選択した場合は、**現在Streamlitを実行しているターミナルをゴミ箱アイコンで閉じ（または `Ctrl+C` で終了し）、新しいターミナルを開いてから `python -m streamlit run app.py`** で起動し直してください。")
+
 # Function to fetch and translate news
 @st.cache_data(ttl=1800) # Cache for 30 minutes to avoid hitting API/RSS limits
 def fetch_49ers_news():
-    import feedparser
-    try:
-        from googletrans import Translator
-        translator = Translator()
-        has_translator = True
-    except ImportError:
-        has_translator = False
-
     # Using Google News RSS for 49ers
     rss_url = "https://news.google.com/rss/search?q=San+Francisco+49ers&hl=en-US&gl=US&ceid=US:en"
     feed = feedparser.parse(rss_url)
@@ -132,24 +137,42 @@ def fetch_49ers_news():
     for entry in feed.entries[:5]:
         eng_title = entry.title
         
-        # Google News summary is often messy HTML, so we use source, date, and link as the "summary/link"
+        # Google News summary is usually HTML. We extract actual text if possible.
+        raw_summary = getattr(entry, 'summary', '')
+        clean_summary = html.unescape(re.sub('<[^<]+?>', '', raw_summary)).strip()
+        
+        # Remove repeated title from the beginning of google news summary if present
+        if clean_summary.startswith(eng_title):
+            clean_summary = clean_summary.replace(eng_title, "", 1).strip()
+            
         source = getattr(entry, 'source', {}).get('title', 'Google News')
         published = getattr(entry, 'published', '')
         link = getattr(entry, 'link', '')
-        eng_body = f"Source: {source} <br/> Published: {published} <br/> <a href='{link}' target='_blank'>Read Full Article</a>"
+        
+        # Build English body
+        summary_disp = f"{clean_summary}<br/><br/>" if clean_summary else ""
+        eng_body = f"{summary_disp}Source: {source} <br/> Published: {published} <br/> <a href='{link}' target='_blank'>Read Full Article</a>"
         
         # Default placeholder for translation
         jp_title = "翻訳結果：考え中..."
-        jp_body = f"配信元: {source} <br/> 日時: {published} <br/> <a href='{link}' target='_blank'>記事を読む (英語)</a>"
+        jp_body = f"{summary_disp}配信元: {source} <br/> 日時: {published} <br/> <a href='{link}' target='_blank'>記事を読む (英語)</a>"
         
-        if has_translator:
+        if translator_instance:
             try:
                 # Attempt to translate the title
-                translated = translator.translate(eng_title, dest='ja')
-                if translated and translated.text:
-                    jp_title = translated.text
+                translated_title = translator_instance.translate(eng_title)
+                if translated_title:
+                    jp_title = translated_title
+                
+                # Attempt to translate the summary if present
+                if clean_summary:
+                    translated_summary = translator_instance.translate(clean_summary)
+                    if translated_summary:
+                        jp_body = f"{translated_summary}<br/><br/>配信元: {source} <br/> 日時: {published} <br/> <a href='{link}' target='_blank'>記事を読む (英語)</a>"
             except Exception as e:
                 # Fallback to placeholder if translation API fails
+                st.error(f"Translation failed: {e}")
+                print(f"Translation Exception: {e}")
                 pass
                 
         news_items.append({
